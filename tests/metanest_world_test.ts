@@ -32,6 +32,57 @@ Clarinet.test({
     let worldData = worldDataBlock.receipts[0].result.expectSome();
     assertEquals(worldData['name'], "Test World");
     assertEquals(worldData['owner'], deployer.address);
+    assertEquals(worldData['activity-count'], types.uint(0));
+    assertEquals(worldData['total-rewards'], types.uint(0));
+  },
+});
+
+Clarinet.test({
+  name: "Test creating and participating in world activities",
+  async fn(chain: Chain, accounts: Map<string, Account>) {
+    const deployer = accounts.get('deployer')!;
+    const participant = accounts.get('wallet_1')!;
+    
+    // Create world
+    let block = chain.mineBlock([
+      Tx.contractCall('metanest-world', 'create-world', [
+        types.ascii("Activity World"),
+        types.ascii("A world with activities"),
+      ], deployer.address)
+    ]);
+    
+    // Create activity
+    let activityBlock = chain.mineBlock([
+      Tx.contractCall('metanest-world', 'create-activity', [
+        types.uint(1),
+        types.ascii("Test Activity"),
+        types.ascii("An activity with rewards"),
+        types.uint(100)
+      ], deployer.address)
+    ]);
+    
+    activityBlock.receipts[0].result.expectOk();
+    
+    // Participate in activity
+    let participateBlock = chain.mineBlock([
+      Tx.contractCall('metanest-world', 'participate-activity', [
+        types.uint(1),
+        types.uint(1)
+      ], participant.address)
+    ]);
+    
+    participateBlock.receipts[0].result.expectOk();
+    
+    // Verify activity data
+    let activityDataBlock = chain.mineBlock([
+      Tx.contractCall('metanest-world', 'get-activity-data', [
+        types.uint(1),
+        types.uint(1)
+      ], deployer.address)
+    ]);
+    
+    let activityData = activityDataBlock.receipts[0].result.expectSome();
+    assertEquals(activityData['participants'], types.uint(1));
   },
 });
 
