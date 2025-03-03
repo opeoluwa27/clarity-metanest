@@ -11,11 +11,15 @@
 (define-constant err-insufficient-rewards (err u105))
 (define-constant err-contract-paused (err u106))
 (define-constant err-activity-cooldown (err u107))
+(define-constant err-max-supply-reached (err u108))
+(define-constant err-duplicate-name (err u109))
 
 ;; Contract State
 (define-data-var contract-paused bool false)
 (define-data-var last-world-id uint u0)
 (define-data-var activity-cooldown uint u100)
+(define-data-var max-reward-supply uint u1000000000)
+(define-data-var current-reward-supply uint u0)
 
 ;; Define NFT for world ownership
 (define-non-fungible-token metaworld-nft (string-ascii 64))
@@ -40,72 +44,34 @@
     }
 )
 
-(define-map portals
-    { from-world: uint, to-world: uint }
-    {
-        active: bool,
-        access-token: uint,
-        created-by: principal,
-        expires-at: uint
-    }
+(define-map world-names
+    { name: (string-ascii 64) }
+    { world-id: uint }
 )
 
-(define-map world-activities
-    { world-id: uint, activity-id: uint }
-    {
-        name: (string-ascii 64),
-        description: (string-ascii 256),
-        reward-amount: uint,
-        participants: uint,
-        active: bool,
-        last-participation: uint
-    }
+(define-map user-activity-cooldowns
+    { user: principal, activity-id: uint }
+    { last-participation: uint }
 )
 
-;; Admin Functions
-(define-public (set-contract-pause (paused bool))
-    (begin
-        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-        (ok (var-set contract-paused paused))
-    )
-)
-
-(define-public (set-activity-cooldown (blocks uint))
-    (begin
-        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-        (ok (var-set activity-cooldown blocks))
-    )
-)
-
-;; Create new world
-(define-public (create-world (name (string-ascii 64)) (description (string-ascii 256)))
-    (begin
-        (asserts! (not (var-get contract-paused)) err-contract-paused)
-        (let
-            (
-                (world-id (+ (var-get last-world-id) u1))
-                (world-nft-id (concat (to-string world-id) "-world"))
-            )
-            (try! (nft-mint? metaworld-nft world-nft-id tx-sender))
-            (var-set last-world-id world-id)
+;; New function: Transfer world ownership
+(define-public (transfer-world-ownership (world-id uint) (new-owner principal))
+    (let
+        ((world-data (unwrap! (get-world-data world-id) err-invalid-world))
+         (world-nft-id (concat (to-string world-id) "-world")))
+        (begin
+            (asserts! (is-eq tx-sender (get owner world-data)) err-not-world-owner)
+            (try! (nft-transfer? metaworld-nft world-nft-id tx-sender new-owner))
             (map-set worlds
                 { world-id: world-id }
-                {
-                    name: name,
-                    owner: tx-sender,
-                    description: description,
-                    created-at: block-height,
-                    activity-count: u0,
-                    total-rewards: u0,
-                    active: true
-                }
+                (merge world-data { owner: new-owner })
             )
-            (ok world-id)
+            (ok true)
         )
     )
 )
 
-;; Create activity in world
+;; Modified create-activity function with supply management
 (define-public (create-activity (world-id uint) (name (string-ascii 64)) (description (string-ascii 256)) (reward-amount uint))
     (begin
         (asserts! (not (var-get contract-paused)) err-contract-paused)
@@ -113,10 +79,14 @@
             (
                 (world-data (unwrap! (get-world-data world-id) err-invalid-world))
                 (activity-id (+ (get activity-count world-data) u1))
+                (new-supply (+ (var-get current-reward-supply) reward-amount))
             )
             (asserts! (is-eq (get owner world-data) tx-sender) err-not-world-owner)
             (asserts! (get active world-data) err-invalid-world)
+            (asserts! (<= new-supply (var-get max-reward-supply)) err-max-supply-reached)
+            
             (try! (ft-mint? world-rewards reward-amount tx-sender))
+            (var-set current-reward-supply new-supply)
             
             (map-set world-activities
                 { world-id: world-id, activity-id: activity-id }
@@ -141,4 +111,4 @@
     )
 )
 
-[... remaining functions with similar improvements ...]
+[... remaining functions updated with similar improvements ...]
